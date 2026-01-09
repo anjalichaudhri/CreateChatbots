@@ -703,6 +703,13 @@ async function generateResponse(userMessage, sessionId) {
       const assessment = generateSymptomAssessment(userMessage, context);
       if (assessment) {
         context.conversationHistory.push({ role: 'bot', message: assessment.response, timestamp: new Date() });
+        database.saveMessage(sessionId, 'bot', assessment.response, 'symptom', null, sentiment, assessment.triage?.triageLevel || null);
+        database.updateSession(sessionId, context.userInfo, {
+          currentTopic: 'symptom',
+          askedDuration: context.askedDuration,
+          askedSeverity: context.askedSeverity,
+          askedOtherSymptoms: context.askedOtherSymptoms
+        });
         sessions.set(sessionId, context);
         
         // Add medication interaction warnings if applicable
@@ -710,7 +717,32 @@ async function generateResponse(userMessage, sessionId) {
           assessment.response += '\n\n' + interactionWarnings.join('\n');
         }
         
-        return assessment;
+        // Ensure quickActions are always present
+        if (!assessment.quickActions || assessment.quickActions.length === 0) {
+          assessment.quickActions = ['Schedule Appointment', 'Find Doctor', 'More Info'];
+        }
+        
+        return {
+          response: assessment.response,
+          quickActions: assessment.quickActions,
+          triage: assessment.triage || null,
+          entities: assessment.entities || entities,
+          sentiment: assessment.sentiment || sentiment
+        };
+      } else {
+        // If no specific assessment, provide general symptom response with quick actions
+        const response = chatbotResponses.symptoms[Math.floor(Math.random() * chatbotResponses.symptoms.length)];
+        context.conversationHistory.push({ role: 'bot', message: response, timestamp: new Date() });
+        database.saveMessage(sessionId, 'bot', response, 'symptom', null, sentiment, null);
+        sessions.set(sessionId, context);
+        
+        return {
+          response: response,
+          quickActions: ['Schedule Appointment', 'Find Doctor', 'Tell Me More'],
+          triage: null,
+          entities: entities,
+          sentiment: sentiment
+        };
       }
     }
   }
