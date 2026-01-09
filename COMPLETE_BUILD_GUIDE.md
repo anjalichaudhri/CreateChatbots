@@ -12,9 +12,10 @@ This comprehensive guide documents the complete journey of building a powerful h
 4. [Phase 3: Healthcare Focus](#phase-3-healthcare-focus)
 5. [Phase 4: Advanced Features](#phase-4-advanced-features)
 6. [Phase 5: Making it Powerful](#phase-5-making-it-powerful)
-7. [Phase 6: AI Integration](#phase-6-ai-integration)
-8. [Troubleshooting](#troubleshooting)
-9. [Next Steps](#next-steps)
+7. [Phase 6: Enhanced Appointment Booking Flow](#phase-6-enhanced-appointment-booking-flow)
+8. [Phase 7: AI Integration](#phase-7-ai-integration)
+9. [Troubleshooting](#troubleshooting)
+10. [Next Steps](#next-steps)
 
 ---
 
@@ -1027,7 +1028,224 @@ app.use('/api/', limiter);
 
 ---
 
-## Phase 6: AI Integration
+## Phase 6: Enhanced Appointment Booking Flow
+
+### Overview
+In this phase, we enhanced the appointment booking system to provide a complete multi-step guided flow with context-aware follow-up questions and quick action buttons at each step.
+
+### Problem
+Previously, clicking "Book Now" or "Schedule Appointment" would only provide a generic response without gathering specific appointment details or guiding users through the booking process.
+
+### Solution
+We implemented a sophisticated multi-turn conversation flow that:
+1. Asks for appointment type
+2. Asks for preferred date
+3. Asks for reason for visit
+4. Provides a complete summary with booking instructions
+
+### Step 6.1: Create Appointment Flow Handler
+
+**File:** `server.js`
+
+```javascript
+// Handle appointment booking flow with follow-up questions
+function handleAppointmentFlow(message, context, sessionId) {
+  const msg = message.toLowerCase();
+  
+  // Ensure sessionId is available
+  if (!sessionId && context.sessionId) {
+    sessionId = context.sessionId;
+  }
+  if (!sessionId) {
+    return null; // Can't proceed without sessionId
+  }
+  
+  // Check if this is a booking trigger (not an answer)
+  const bookingTriggers = ['book now', 'schedule appointment', 'book', 'schedule', 'check availability'];
+  if (bookingTriggers.includes(msg) && !context.askedAppointmentType) {
+    // User wants to book, start the flow
+    context.askedAppointmentType = true;
+    
+    let response = chatbotResponses.appointment[Math.floor(Math.random() * chatbotResponses.appointment.length)];
+    response += `\n\nWhat type of appointment are you looking for?`;
+    
+    const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+    context.conversationHistory.push(botMessage);
+    database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+    database.updateSession(sessionId, context.userInfo, {
+      currentTopic: 'appointment',
+      askedAppointmentType: context.askedAppointmentType
+    });
+    sessions.set(sessionId, context);
+    
+    return {
+      response: response,
+      quickActions: ['General Checkup', 'Specialist Visit', 'Follow-up', 'Emergency']
+    };
+  }
+  
+  // Check if user is responding to appointment questions
+  if (context.askedAppointmentType && !context.askedAppointmentDate) {
+    // User provided appointment type, now ask for date
+    if (!bookingTriggers.includes(msg)) {
+      context.appointmentType = message;
+      context.askedAppointmentDate = true;
+      
+      let response = `Thank you! You're looking for a ${message} appointment. `;
+      response += `What date would work best for you?`;
+      
+      // ... save to database and return response with quick actions
+      return {
+        response: response,
+        quickActions: ['Tomorrow', 'Next Week', 'This Week', 'Cancel']
+      };
+    }
+  }
+  
+  // Similar logic for date → reason, and reason → summary
+  // ...
+}
+```
+
+**Explanation:**
+- **WHY**: Provides a structured, user-friendly booking experience
+- **HOW**: Uses context flags (`askedAppointmentType`, `askedAppointmentDate`, `askedAppointmentReason`) to track flow state
+- **WHEN**: Triggered when user clicks "Book Now" or mentions appointment booking
+- **WHERE**: Called early in `generateResponse()` before intent detection to maintain flow context
+
+### Step 6.2: Add Context State Management
+
+**File:** `server.js`
+
+```javascript
+// In context initialization
+context = {
+  conversationHistory: [],
+  currentTopic: null,
+  // ... existing fields ...
+  askedAppointmentType: false,
+  askedAppointmentDate: false,
+  askedAppointmentReason: false,
+  appointmentType: null,
+  appointmentDate: null,
+  appointmentReason: null,
+  sessionId: sessionId
+};
+```
+
+**Explanation:**
+- **WHY**: Tracks where user is in the appointment flow
+- **HOW**: Boolean flags indicate which question was asked, variables store answers
+- **WHEN**: Initialized for each new session, updated during appointment flow
+- **WHERE**: Part of session context object, persisted to database
+
+### Step 6.3: Integrate Flow Check Early in Response Generation
+
+**File:** `server.js`
+
+```javascript
+async function generateResponse(userMessage, sessionId) {
+  // ... context loading ...
+  
+  // Check appointment flow BEFORE emergency (if already in appointment flow)
+  if (context.askedAppointmentType || context.askedAppointmentDate || context.askedAppointmentReason) {
+    const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
+    if (appointmentFlow) {
+      return appointmentFlow;
+    }
+  }
+  
+  // ... rest of response generation ...
+}
+```
+
+**Explanation:**
+- **WHY**: Ensures appointment flow takes priority over intent detection when user is mid-flow
+- **HOW**: Checks context flags before processing intents
+- **WHEN**: On every message when user is in appointment flow
+- **WHERE**: Early in `generateResponse()` function, before emergency checks
+
+### Step 6.4: Update Intent Detection Pattern
+
+**File:** `server.js`
+
+```javascript
+const intentPatterns = {
+  // ... other patterns ...
+  appointment: /\b(appointment|schedule|book|visit|see doctor|see a doctor|consultation|checkup|exam|available|when|book now|check availability|find doctor)\b/,
+};
+```
+
+**Explanation:**
+- **WHY**: Recognizes "Book Now" and similar triggers as appointment intents
+- **HOW**: Extended regex pattern to include booking-related phrases
+- **WHEN**: During intent detection phase
+- **WHERE**: In `detectIntent()` function
+
+### Step 6.5: Complete Flow with Summary
+
+**File:** `server.js`
+
+```javascript
+if (context.askedAppointmentReason) {
+  // User provided reason, complete booking
+  context.appointmentReason = message;
+  
+  let response = `Perfect! I have your appointment details:\n\n`;
+  response += `**Appointment Type:** ${context.appointmentType || 'General'}\n`;
+  response += `**Preferred Date:** ${context.appointmentDate || 'Not specified'}\n`;
+  response += `**Reason:** ${message}\n\n`;
+  response += `To complete your booking, you can:\n`;
+  response += `1. Call our scheduling line at (555) 123-4567\n`;
+  response += `2. Visit our online portal at www.healthcareportal.com\n`;
+  response += `3. Use our mobile app\n\n`;
+  response += `Our team will confirm your appointment within 24 hours.`;
+  
+  // Reset appointment flow
+  context.askedAppointmentType = false;
+  context.askedAppointmentDate = false;
+  context.askedAppointmentReason = false;
+  // ... save to database ...
+  
+  return {
+    response: response,
+    quickActions: ['New Appointment', 'View Details', 'Contact Support']
+  };
+}
+```
+
+**Explanation:**
+- **WHY**: Provides complete booking summary and next steps
+- **HOW**: Compiles all collected information into formatted summary
+- **WHEN**: After user provides reason for visit
+- **WHERE**: In `handleAppointmentFlow()` function
+
+### Key Features Implemented
+
+1. **Multi-Step Flow**: 4-step guided process (type → date → reason → summary)
+2. **Context Awareness**: Remembers where user is in the flow
+3. **Quick Actions**: Relevant buttons at each step for easy selection
+4. **Database Persistence**: All appointment details saved to database
+5. **Flow Reset**: Automatically resets after completion for new bookings
+
+### Testing the Flow
+
+1. Click "Book Now" → Bot asks for appointment type
+2. Select "General Checkup" → Bot asks for date
+3. Select "Tomorrow" → Bot asks for reason
+4. Select "Routine Checkup" → Bot provides complete summary
+
+### Benefits
+
+- **Better UX**: Guided process reduces confusion
+- **Complete Information**: Collects all necessary booking details
+- **Quick Actions**: One-click selection for common options
+- **Context Preservation**: Maintains flow state across messages
+- **Professional**: Provides structured booking experience
+
+---
+
+## Phase 7: AI Integration
 
 ### Step 6.1: Install OpenAI Package
 

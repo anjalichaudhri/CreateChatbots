@@ -281,7 +281,7 @@ function detectIntent(message, context) {
     goodbye: /\b(bye|goodbye|see you|farewell|exit|quit|thanks|thank you|appreciate)\b/,
     help: /\b(help|what can you do|how can you help|assist|capabilities|features)\b/,
     symptom: /\b(symptom|pain|ache|hurt|fever|nausea|dizzy|headache|stomach|feeling|unwell|sick|illness|disease|condition|tired|fatigue|weak|sore)\b/,
-    appointment: /\b(appointment|schedule|book|visit|see doctor|see a doctor|consultation|checkup|exam|available|when)\b/,
+    appointment: /\b(appointment|schedule|book|visit|see doctor|see a doctor|consultation|checkup|exam|available|when|book now|check availability|find doctor)\b/,
     medication: /\b(medication|medicine|drug|pill|prescription|dosage|side effect|interaction|pharmacy|take|taking)\b/,
     wellness: /\b(wellness|healthy|diet|exercise|fitness|nutrition|sleep|stress|mental health|prevention|preventive|weight|fitness)\b/,
     specialty: /\b(cardiologist|dermatologist|neurologist|orthopedic|pediatrician|psychiatrist|specialist|specialty)\b/,
@@ -413,6 +413,166 @@ function extractSymptomInfo(message) {
   const severity = msg.match(/\b(severe|mild|moderate|intense|extreme|slight)\b/i)?.[1] || null;
   
   return { symptoms, duration, severity };
+}
+
+// Handle appointment booking flow with follow-up questions
+function handleAppointmentFlow(message, context, sessionId) {
+  const msg = message.toLowerCase();
+  
+  // Ensure sessionId is available
+  if (!sessionId && context.sessionId) {
+    sessionId = context.sessionId;
+  }
+  
+  // Check if this is a booking trigger (not an answer)
+  const bookingTriggers = ['book now', 'schedule appointment', 'book', 'schedule', 'check availability'];
+  if (bookingTriggers.includes(msg) && !context.askedAppointmentType) {
+    // User wants to book, start the flow
+    context.askedAppointmentType = true;
+    
+    let response = chatbotResponses.appointment[Math.floor(Math.random() * chatbotResponses.appointment.length)];
+    response += `\n\nWhat type of appointment are you looking for?`;
+    
+    const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+    context.conversationHistory.push(botMessage);
+    database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+    database.updateSession(sessionId, context.userInfo, {
+      currentTopic: 'appointment',
+      askedAppointmentType: context.askedAppointmentType
+    });
+    sessions.set(sessionId, context);
+    
+    return {
+      response: response,
+      quickActions: ['General Checkup', 'Specialist Visit', 'Follow-up', 'Emergency']
+    };
+  }
+  
+  // Check if user is responding to appointment questions
+  if (context.askedAppointmentType && !context.askedAppointmentDate) {
+    // User provided appointment type, now ask for date
+    // Don't treat booking triggers as appointment types
+    if (!bookingTriggers.includes(msg)) {
+      context.appointmentType = message; // Store the type
+      context.askedAppointmentDate = true;
+      
+      let response = `Thank you! You're looking for a ${message} appointment. `;
+      response += `What date would work best for you? You can say things like "tomorrow", "next week", or a specific date.`;
+      
+      const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+      context.conversationHistory.push(botMessage);
+      database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+      database.updateSession(sessionId, context.userInfo, {
+        currentTopic: 'appointment',
+        askedAppointmentType: context.askedAppointmentType,
+        askedAppointmentDate: context.askedAppointmentDate,
+        askedAppointmentReason: context.askedAppointmentReason,
+        appointmentType: context.appointmentType
+      });
+      sessions.set(sessionId, context);
+      
+      return {
+        response: response,
+        quickActions: ['Tomorrow', 'Next Week', 'This Week', 'Cancel']
+      };
+    }
+    // If it's a booking trigger, restart the flow
+    return null;
+  }
+  
+  if (context.askedAppointmentDate && !context.askedAppointmentReason) {
+    // User provided date, now ask for reason
+    context.appointmentDate = message;
+    context.askedAppointmentReason = true;
+    
+    let response = `Great! ${message} works. `;
+    response += `What is the reason for your visit? (e.g., routine checkup, specific symptoms, follow-up)`;
+    
+    const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+    context.conversationHistory.push(botMessage);
+    database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+    database.updateSession(sessionId, context.userInfo, {
+      currentTopic: 'appointment',
+      askedAppointmentType: context.askedAppointmentType,
+      askedAppointmentDate: context.askedAppointmentDate,
+      askedAppointmentReason: context.askedAppointmentReason,
+      appointmentType: context.appointmentType,
+      appointmentDate: context.appointmentDate
+    });
+    sessions.set(sessionId, context);
+    
+    return {
+      response: response,
+      quickActions: ['Routine Checkup', 'Follow-up', 'Symptoms', 'Other']
+    };
+  }
+  
+  if (context.askedAppointmentReason) {
+    // User provided reason, complete booking
+    context.appointmentReason = message;
+    
+    let response = `Perfect! I have your appointment details:\n\n`;
+    response += `**Appointment Type:** ${context.appointmentType || 'General'}\n`;
+    response += `**Preferred Date:** ${context.appointmentDate || 'Not specified'}\n`;
+    response += `**Reason:** ${message}\n\n`;
+    response += `To complete your booking, you can:\n`;
+    response += `1. Call our scheduling line at (555) 123-4567\n`;
+    response += `2. Visit our online portal at www.healthcareportal.com\n`;
+    response += `3. Use our mobile app\n\n`;
+    response += `Our team will confirm your appointment within 24 hours.`;
+    
+    const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+    context.conversationHistory.push(botMessage);
+    database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+    
+    // Reset appointment flow
+    context.askedAppointmentType = false;
+    context.askedAppointmentDate = false;
+    context.askedAppointmentReason = false;
+    context.appointmentType = null;
+    context.appointmentDate = null;
+    context.appointmentReason = null;
+    
+    database.updateSession(sessionId, context.userInfo, {
+      currentTopic: 'appointment',
+      askedAppointmentType: false,
+      askedAppointmentDate: false,
+      askedAppointmentReason: false,
+      appointmentType: null,
+      appointmentDate: null,
+      appointmentReason: null
+    });
+    sessions.set(sessionId, context);
+    
+    return {
+      response: response,
+      quickActions: ['New Appointment', 'View Details', 'Contact Support']
+    };
+  }
+  
+  // Start appointment flow - ask for type
+  if (!context.askedAppointmentType) {
+    context.askedAppointmentType = true;
+    
+    let response = chatbotResponses.appointment[Math.floor(Math.random() * chatbotResponses.appointment.length)];
+    response += `\n\nWhat type of appointment are you looking for?`;
+    
+    const botMessage = { role: 'bot', message: response, timestamp: new Date() };
+    context.conversationHistory.push(botMessage);
+    database.saveMessage(sessionId, 'bot', response, 'appointment', null, null, null);
+    database.updateSession(sessionId, context.userInfo, {
+      currentTopic: 'appointment',
+      askedAppointmentType: context.askedAppointmentType
+    });
+    sessions.set(sessionId, context);
+    
+    return {
+      response: response,
+      quickActions: ['General Checkup', 'Specialist Visit', 'Follow-up', 'Emergency']
+    };
+  }
+  
+  return null; // Continue with default flow
 }
 
 // Generate advanced symptom assessment with triage
@@ -570,13 +730,16 @@ async function generateResponse(userMessage, sessionId) {
       context = {
         conversationHistory: [],
         currentTopic: null,
-        askedDuration: false,
-        askedSeverity: false,
-        askedOtherSymptoms: false,
-        userInfo: {},
-        medications: [],
-        symptoms: []
-      };
+      askedDuration: false,
+      askedSeverity: false,
+      askedOtherSymptoms: false,
+      askedAppointmentType: false,
+      askedAppointmentDate: false,
+      askedAppointmentReason: false,
+      userInfo: {},
+      medications: [],
+      symptoms: []
+    };
     }
   }
   
@@ -621,6 +784,15 @@ async function generateResponse(userMessage, sessionId) {
   
   // Update analytics
   updateAnalytics(intent, sessionId);
+  
+  // Check appointment flow BEFORE emergency (if already in appointment flow)
+  // This handles multi-turn appointment conversations
+  if (context.askedAppointmentType || context.askedAppointmentDate || context.askedAppointmentReason) {
+    const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
+    if (appointmentFlow) {
+      return appointmentFlow;
+    }
+  }
   
   // Emergency check (highest priority) - always use rule-based for safety
   if (intent === 'emergency') {
@@ -830,6 +1002,18 @@ async function generateResponse(userMessage, sessionId) {
         quickActions = ['Symptoms', 'Appointments', 'Medications', 'Wellness'];
         break;
       case 'appointment':
+        // Try appointment flow first
+        const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
+        if (appointmentFlow) {
+          const botMessage = { role: 'bot', message: appointmentFlow.response, timestamp: new Date() };
+          context.conversationHistory.push(botMessage);
+          sessions.set(sessionId, context);
+          return {
+            response: appointmentFlow.response,
+            quickActions: appointmentFlow.quickActions || ['Book Now', 'Find Doctor', 'Check Availability']
+          };
+        }
+        // Default appointment response
         response = chatbotResponses.appointment[Math.floor(Math.random() * chatbotResponses.appointment.length)];
         quickActions = ['Book Now', 'Find Doctor', 'Check Availability'];
         break;
@@ -868,7 +1052,13 @@ async function generateResponse(userMessage, sessionId) {
     currentTopic: intent,
     askedDuration: context.askedDuration,
     askedSeverity: context.askedSeverity,
-    askedOtherSymptoms: context.askedOtherSymptoms
+    askedOtherSymptoms: context.askedOtherSymptoms,
+    askedAppointmentType: context.askedAppointmentType,
+    askedAppointmentDate: context.askedAppointmentDate,
+    askedAppointmentReason: context.askedAppointmentReason,
+    appointmentType: context.appointmentType,
+    appointmentDate: context.appointmentDate,
+    appointmentReason: context.appointmentReason
   });
   if (!updated) {
     console.error('⚠️ Failed to update session in database');
@@ -926,6 +1116,13 @@ app.post('/api/chat', (req, res) => {
       askedDuration: false,
       askedSeverity: false,
       askedOtherSymptoms: false,
+      askedAppointmentType: false,
+      askedAppointmentDate: false,
+      askedAppointmentReason: false,
+      appointmentType: null,
+      appointmentDate: null,
+      appointmentReason: null,
+      sessionId: sessionId,
       userInfo: {},
       medications: [],
       symptoms: [],

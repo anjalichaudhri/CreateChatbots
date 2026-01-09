@@ -11,6 +11,7 @@ A powerful, enterprise-grade healthcare chatbot with advanced NLP, real-time ana
 - 🔍 **Advanced Symptom Assessment**: Multi-turn conversations with intelligent follow-up questions
 - 💡 **Context-Aware Responses**: Remembers conversation history and provides personalized follow-ups
 - ⚡ **Quick Action Buttons**: Interactive buttons for common actions (Schedule Appointment, Find Doctor, etc.)
+- 📅 **Advanced Appointment Booking Flow**: Multi-step guided appointment booking with context-aware follow-up questions
 - 🔄 **Session Management**: Persistent conversations with localStorage integration
 - 📊 **Conversation History**: Track and retrieve past conversations
 
@@ -52,6 +53,7 @@ A powerful, enterprise-grade healthcare chatbot with advanced NLP, real-time ana
 - 📱 Mobile-friendly responsive layout
 - 🚨 **Smart Emergency Detection**: Priority handling for emergency keywords
 - 💊 Medication information support with safety reminders
+- 📅 **Advanced Appointment Booking**: Multi-step guided flow (type → date → reason → summary) with quick action buttons at each step
 - 📅 Appointment scheduling assistance with specialty matching
 - 🌿 **Categorized Wellness Tips**: Nutrition, exercise, sleep, and mental health guidance
 - 🏥 **Specialty Information**: Details about different medical specialties
