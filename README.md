@@ -2,6 +2,12 @@
 
 A powerful, enterprise-grade healthcare chatbot with advanced NLP, real-time analytics, medication interaction checking, intelligent triage, and comprehensive medical knowledge base.
 
+## 📸 Application Preview
+
+![Healthcare Chatbot UI](chatbot-ui-screenshot.png)
+
+*Modern, user-friendly interface with real-time chat capabilities, quick action buttons, and healthcare-focused design.*
+
 ## 🚀 Powerful Features
 
 ### Core Capabilities
