@@ -730,17 +730,26 @@ async function generateResponse(userMessage, sessionId) {
       context = {
         conversationHistory: [],
         currentTopic: null,
-      askedDuration: false,
-      askedSeverity: false,
-      askedOtherSymptoms: false,
-      askedAppointmentType: false,
-      askedAppointmentDate: false,
-      askedAppointmentReason: false,
-      userInfo: {},
-      medications: [],
-      symptoms: []
-    };
+        askedDuration: false,
+        askedSeverity: false,
+        askedOtherSymptoms: false,
+        askedAppointmentType: false,
+        askedAppointmentDate: false,
+        askedAppointmentReason: false,
+        appointmentType: null,
+        appointmentDate: null,
+        appointmentReason: null,
+        sessionId: sessionId,
+        userInfo: {},
+        medications: [],
+        symptoms: []
+      };
     }
+  }
+  
+  // Ensure sessionId is always set
+  if (!context.sessionId) {
+    context.sessionId = sessionId;
   }
   
   // Extract entities
@@ -787,10 +796,29 @@ async function generateResponse(userMessage, sessionId) {
   
   // Check appointment flow BEFORE emergency (if already in appointment flow)
   // This handles multi-turn appointment conversations
-  if (context.askedAppointmentType || context.askedAppointmentDate || context.askedAppointmentReason) {
-    const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
-    if (appointmentFlow) {
-      return appointmentFlow;
+  if (context && (context.askedAppointmentType || context.askedAppointmentDate || context.askedAppointmentReason)) {
+    try {
+      const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
+      if (appointmentFlow && appointmentFlow.response) {
+        return appointmentFlow;
+      }
+    } catch (error) {
+      console.error('❌ Error in handleAppointmentFlow:', error);
+      // Continue with normal flow if appointment flow fails
+    }
+  }
+  
+  // Also check if this is a booking trigger (even if not in flow yet)
+  const bookingTriggers = ['book now', 'schedule appointment', 'book', 'schedule', 'check availability'];
+  if (context && bookingTriggers.includes(message) && intent === 'appointment') {
+    try {
+      const appointmentFlow = handleAppointmentFlow(userMessage, context, sessionId);
+      if (appointmentFlow && appointmentFlow.response) {
+        return appointmentFlow;
+      }
+    } catch (error) {
+      console.error('❌ Error starting appointment flow:', error);
+      // Continue with normal flow if appointment flow fails
     }
   }
   
@@ -1135,7 +1163,13 @@ app.post('/api/chat', (req, res) => {
       currentTopic: null,
       askedDuration: false,
       askedSeverity: false,
-      askedOtherSymptoms: false
+      askedOtherSymptoms: false,
+      askedAppointmentType: false,
+      askedAppointmentDate: false,
+      askedAppointmentReason: false,
+      appointmentType: null,
+      appointmentDate: null,
+      appointmentReason: null
     });
     database.logEvent('session_created', { sessionId }, sessionId);
     analytics.totalConversations++;
@@ -1148,6 +1182,14 @@ app.post('/api/chat', (req, res) => {
       const result = await generateResponse(message, sessionId);
       const session = sessions.get(sessionId) || { conversationHistory: [] };
       
+      if (!result || !result.response) {
+        console.error('⚠️ generateResponse returned invalid result:', result);
+        return res.status(500).json({ 
+          error: 'Sorry, I encountered an error. Please try again.',
+          sessionId: sessionId
+        });
+      }
+      
       res.json({ 
         response: result.response,
         quickActions: result.quickActions || [],
@@ -1159,8 +1201,12 @@ app.post('/api/chat', (req, res) => {
         aiEnhanced: result.aiEnhanced || false
       });
     } catch (error) {
-      console.error('Error generating response:', error);
-      res.status(500).json({ error: 'An error occurred processing your request' });
+      console.error('❌ Error generating response:', error);
+      console.error('Error stack:', error.stack);
+      res.status(500).json({ 
+        error: 'Sorry, I encountered an error. Please try again.',
+        sessionId: sessionId
+      });
     }
   }, 500);
 });
